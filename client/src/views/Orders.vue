@@ -27,6 +27,50 @@
         </div>
       </div>
 
+      <!-- Submitted Restock Orders card — appears above All Orders -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Submitted Restock Orders ({{ restockOrders.length }})</h3>
+        </div>
+        <div v-if="!restockOrders.length" class="restock-empty">
+          No restock orders submitted yet.
+        </div>
+        <div v-else class="table-container">
+          <table class="restock-orders-table">
+            <thead>
+              <tr>
+                <th class="col-restock-id">Order ID</th>
+                <th class="col-restock-date">Submitted</th>
+                <th class="col-restock-items">Items</th>
+                <th class="col-restock-cost">Total Cost</th>
+                <th class="col-restock-lead">Lead Time (days)</th>
+                <th class="col-restock-delivery">Expected Delivery</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="order in restockOrders" :key="order.id">
+                <td class="col-restock-id"><strong>{{ order.id }}</strong></td>
+                <td class="col-restock-date">{{ formatDate(order.submitted_at) }}</td>
+                <td class="col-restock-items">
+                  <details class="items-details">
+                    <summary class="items-summary">{{ order.items.length }} item{{ order.items.length !== 1 ? 's' : '' }}</summary>
+                    <div class="items-dropdown">
+                      <div v-for="item in order.items" :key="item.sku" class="item-entry">
+                        <span class="item-name">{{ item.name }}</span>
+                        <span class="item-meta">{{ item.sku }} &mdash; Qty: {{ item.quantity }} &bull; {{ currencySymbol }}{{ item.line_total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                      </div>
+                    </div>
+                  </details>
+                </td>
+                <td class="col-restock-cost"><strong>{{ currencySymbol }}{{ order.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</strong></td>
+                <td class="col-restock-lead">{{ order.max_lead_time_days }}</td>
+                <td class="col-restock-delivery">{{ formatDate(order.expected_delivery) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">{{ t('orders.allOrders') }} ({{ orders.length }})</h3>
@@ -95,6 +139,7 @@ export default {
     const loading = ref(true)
     const error = ref(null)
     const orders = ref([])
+    const restockOrders = ref([])
 
     // Use shared filters
     const {
@@ -109,7 +154,12 @@ export default {
       try {
         loading.value = true
         const filters = getCurrentFilters()
-        const fetchedOrders = await api.getOrders(filters)
+
+        // Fetch regular orders and submitted restock orders in parallel
+        const [fetchedOrders, fetchedRestockOrders] = await Promise.all([
+          api.getOrders(filters),
+          api.getRestockOrders()
+        ])
 
         // Sort orders by order_date (earliest first)
         orders.value = fetchedOrders.sort((a, b) => {
@@ -117,6 +167,9 @@ export default {
           const dateB = new Date(b.order_date)
           return dateA - dateB
         })
+
+        // Restock orders come newest-first from the API
+        restockOrders.value = fetchedRestockOrders
       } catch (err) {
         error.value = 'Failed to load orders: ' + err.message
       } finally {
@@ -160,6 +213,7 @@ export default {
       loading,
       error,
       orders,
+      restockOrders,
       getOrdersByStatus,
       getOrderStatusClass,
       formatDate,
@@ -275,5 +329,43 @@ export default {
 .item-meta {
   font-size: 0.813rem;
   color: #64748b;
+}
+
+/* Restock orders table */
+.restock-orders-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.col-restock-id {
+  width: 110px;
+}
+
+.col-restock-date {
+  width: 140px;
+}
+
+.col-restock-items {
+  width: 160px;
+}
+
+.col-restock-cost {
+  width: 120px;
+}
+
+.col-restock-lead {
+  width: 130px;
+}
+
+.col-restock-delivery {
+  width: 150px;
+}
+
+.restock-empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #64748b;
+  font-size: 0.938rem;
+  font-style: italic;
 }
 </style>

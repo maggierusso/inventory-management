@@ -2,6 +2,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from pydantic import BaseModel
+from datetime import datetime, timedelta
+import json
+import os
+import uuid
 from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders
 
 app = FastAPI(title="Factory Inventory Management System")
@@ -303,6 +307,198 @@ def get_monthly_trends():
     result = list(months.values())
     result.sort(key=lambda x: x['month'])
     return result
+
+
+# --------------------------------------------------------------------------
+# Restocking
+# --------------------------------------------------------------------------
+
+RESTOCK_ORDERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'restock_orders.json')
+
+# Unit cost + category lookup for demand-forecast SKUs.
+# The demand_forecasts.json dataset is disjoint from inventory.json, so we
+# can't join on SKU to get cost/category — we mock realistic values here.
+DEMAND_ITEM_META = {
+    'WDG-001': {'unit_cost': 12.50, 'category': 'Actuators'},
+    'BRG-102': {'unit_cost': 8.75,  'category': 'Actuators'},
+    'GSK-203': {'unit_cost': 3.20,  'category': 'Sensors'},
+    'MTR-304': {'unit_cost': 145.00,'category': 'Actuators'},
+    'FLT-405': {'unit_cost': 6.40,  'category': 'Sensors'},
+    'VLV-506': {'unit_cost': 22.00, 'category': 'Actuators'},
+    'PSU-501': {'unit_cost': 34.99, 'category': 'Power Supplies'},
+    'SNR-420': {'unit_cost': 11.25, 'category': 'Sensors'},
+    'CTL-330': {'unit_cost': 89.00, 'category': 'Controllers'},
+}
+
+# Lead time in days, keyed by category. Used to compute expected_delivery
+# when a restock order is submitted.
+CATEGORY_LEAD_TIME_DAYS = {
+    'Circuit Boards': 10,
+    'Sensors': 7,
+    'Actuators': 14,
+    'Controllers': 12,
+    'Power Supplies': 9,
+}
+DEFAULT_LEAD_TIME_DAYS = 10
+
+# Trend priority: increasing items are filled first, then stable, then decreasing.
+# Lower value = higher priority (used as primary sort key).
+TREND_PRIORITY = {'increasing': 0, 'stable': 1, 'decreasing': 2}
+
+
+class RestockRecommendation(BaseModel):
+    sku: str
+    name: str
+    category: str
+    trend: str
+    unit_cost: float
+    quantity: int
+    line_total: float
+    lead_time_days: int
+
+
+class RestockOrderItem(BaseModel):
+    sku: str
+    name: str
+    category: str
+    quantity: int
+    unit_cost: float
+    line_total: float
+    lead_time_days: int
+
+
+class RestockOrder(BaseModel):
+    id: str
+    submitted_at: str
+    total_cost: float
+    budget: float
+    items: List[RestockOrderItem]
+    expected_delivery: str
+    max_lead_time_days: int
+
+
+class SubmitRestockRequest(BaseModel):
+    budget: float
+    items: List[RestockOrderItem]
+
+
+def _load_restock_orders() -> list:
+    with open(RESTOCK_ORDERS_PATH, 'r') as f:
+        return json.load(f)
+
+
+def _save_restock_orders(data: list) -> None:
+    with open(RESTOCK_ORDERS_PATH, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+@app.get("/api/restock/recommendations")
+def get_restock_recommendations(budget: float = 10000.0):
+    """Recommend which items to restock given a budget.
+
+    Priority: increasing-trend items first, then stable, then decreasing.
+    Within each tier, cheaper unit_cost wins so coverage is maximized.
+    Each item is filled up to (forecasted_demand - current_demand) or
+    however many units the remaining budget allows.
+    """
+    candidates = []
+    for forecast in demand_forecasts:
+        sku = forecast['item_sku']
+        meta = DEMAND_ITEM_META.get(sku)
+        # Skip items we have no cost/category metadata for — can't price them.
+        if not meta:
+            continue
+
+        # Only recommend items where demand is expected to grow or hold.
+        # We still include decreasing-trend items but they sort last and
+        # usually won't fit in a constrained budget.
+        shortfall = max(0, forecast['forecasted_demand'] - forecast['current_demand'])
+        if shortfall == 0:
+            continue
+
+        candidates.append({
+            'sku': sku,
+            'name': forecast['item_name'],
+            'trend': forecast['trend'],
+            'unit_cost': meta['unit_cost'],
+            'category': meta['category'],
+            'shortfall': shortfall,
+        })
+
+    # Sort by (trend priority, unit_cost) — greedy fill favors cheap,
+    # high-urgency items so a small budget still covers the important stuff.
+    candidates.sort(key=lambda c: (TREND_PRIORITY.get(c['trend'], 99), c['unit_cost']))
+
+    remaining = budget
+    recommendations = []
+    for c in candidates:
+        if remaining <= 0:
+            break
+        # Fill as many units of this SKU as we can afford, up to the shortfall.
+        affordable_qty = int(remaining // c['unit_cost'])
+        qty = min(c['shortfall'], affordable_qty)
+        if qty <= 0:
+            continue
+
+        line_total = round(qty * c['unit_cost'], 2)
+        remaining = round(remaining - line_total, 2)
+        lead_time = CATEGORY_LEAD_TIME_DAYS.get(c['category'], DEFAULT_LEAD_TIME_DAYS)
+
+        recommendations.append({
+            'sku': c['sku'],
+            'name': c['name'],
+            'category': c['category'],
+            'trend': c['trend'],
+            'unit_cost': c['unit_cost'],
+            'quantity': qty,
+            'line_total': line_total,
+            'lead_time_days': lead_time,
+        })
+
+    return {
+        'budget': budget,
+        'spent': round(budget - remaining, 2),
+        'remaining': remaining,
+        'recommendations': recommendations,
+    }
+
+
+@app.post("/api/restock/orders", response_model=RestockOrder)
+def submit_restock_order(req: SubmitRestockRequest):
+    """Persist a restock order to disk and return the stored record."""
+    if not req.items:
+        raise HTTPException(status_code=400, detail="Order must contain at least one item")
+
+    total_cost = round(sum(item.line_total for item in req.items), 2)
+    # The overall delivery date is driven by the slowest line item.
+    max_lead = max(item.lead_time_days for item in req.items)
+    now = datetime.utcnow()
+    expected_delivery = (now + timedelta(days=max_lead)).strftime('%Y-%m-%d')
+
+    order = {
+        'id': str(uuid.uuid4())[:8],
+        'submitted_at': now.strftime('%Y-%m-%dT%H:%M:%S'),
+        'total_cost': total_cost,
+        'budget': req.budget,
+        'items': [item.model_dump() for item in req.items],
+        'expected_delivery': expected_delivery,
+        'max_lead_time_days': max_lead,
+    }
+
+    existing = _load_restock_orders()
+    existing.append(order)
+    _save_restock_orders(existing)
+
+    return order
+
+
+@app.get("/api/restock/orders", response_model=List[RestockOrder])
+def list_restock_orders():
+    """Return all submitted restock orders, newest first."""
+    data = _load_restock_orders()
+    # Reverse so most recent submissions appear at the top of the Orders tab.
+    return list(reversed(data))
+
 
 if __name__ == "__main__":
     import uvicorn
