@@ -6,6 +6,7 @@ export default {
     orders: "注文",
     finance: "財務",
     demandForecast: "需要予測",
+    backlog: "バックログ",
     companyName: "触媒コンポーネンツ",
     subtitle: "在庫管理システム",
   },
@@ -186,6 +187,49 @@ export default {
       trend: "トレンド",
       period: "期間",
     },
+  },
+
+  // Backlog
+  backlog: {
+    title: "バックログ管理",
+    description: "在庫不足の追跡と解決",
+    backlogItems: "バックログ項目",
+    noBacklog: "バックログなし - すべての注文を履行できます！",
+    highPriority: "高優先度",
+    mediumPriority: "中優先度",
+    lowPriority: "低優先度",
+    totalItems: "バックログ項目合計",
+    unitsShort: "単位不足",
+    days: "日",
+    table: {
+      orderId: "注文ID",
+      sku: "SKU",
+      itemName: "品目名",
+      quantityNeeded: "必要数量",
+      quantityAvailable: "在庫数量",
+      shortage: "不足",
+      daysDelayed: "遅延日数",
+      priority: "優先度",
+    },
+  },
+
+  // Purchase Order
+  purchaseOrder: {
+    createTitle: "発注書作成",
+    viewTitle: "発注書詳細",
+    supplierName: "サプライヤー名",
+    quantity: "数量",
+    unitCost: "単価",
+    totalCost: "合計コスト",
+    expectedDelivery: "納品予定日",
+    notes: "備考（任意）",
+    status: "ステータス",
+    createdDate: "作成日",
+    poId: "発注ID",
+    create: "発注書を作成",
+    forItem: "対象品目",
+    supplierPlaceholder: "サプライヤー名を入力...",
+    notesPlaceholder: "特別な指示や備考を追加...",
   },
 
   // Reports

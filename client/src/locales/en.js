@@ -6,6 +6,7 @@ export default {
     orders: "Orders",
     finance: "Finance",
     demandForecast: "Demand Forecast",
+    backlog: "Backlog",
     companyName: "Catalyst Components",
     subtitle: "Inventory Management System",
   },
@@ -186,6 +187,49 @@ export default {
       trend: "Trend",
       period: "Period",
     },
+  },
+
+  // Backlog
+  backlog: {
+    title: "Backlog Management",
+    description: "Track and resolve inventory shortages",
+    backlogItems: "Backlog Items",
+    noBacklog: "No backlog items - all orders can be fulfilled!",
+    highPriority: "High Priority",
+    mediumPriority: "Medium Priority",
+    lowPriority: "Low Priority",
+    totalItems: "Total Backlog Items",
+    unitsShort: "units short",
+    days: "days",
+    table: {
+      orderId: "Order ID",
+      sku: "SKU",
+      itemName: "Item Name",
+      quantityNeeded: "Quantity Needed",
+      quantityAvailable: "Quantity Available",
+      shortage: "Shortage",
+      daysDelayed: "Days Delayed",
+      priority: "Priority",
+    },
+  },
+
+  // Purchase Order
+  purchaseOrder: {
+    createTitle: "Create Purchase Order",
+    viewTitle: "Purchase Order Details",
+    supplierName: "Supplier Name",
+    quantity: "Quantity",
+    unitCost: "Unit Cost",
+    totalCost: "Total Cost",
+    expectedDelivery: "Expected Delivery Date",
+    notes: "Notes (optional)",
+    status: "Status",
+    createdDate: "Created Date",
+    poId: "PO ID",
+    create: "Create Purchase Order",
+    forItem: "For Item",
+    supplierPlaceholder: "Enter supplier name...",
+    notesPlaceholder: "Add any special instructions or notes...",
   },
 
   // Reports
